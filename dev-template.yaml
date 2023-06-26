@@ -1,0 +1,227 @@
+---
+kind: Template
+apiVersion: template.openshift.io/v1
+metadata:
+  name: keycloak-user-service
+objects:
+- apiVersion: policy/v1
+  kind: PodDisruptionBudget
+  metadata:
+    name: keycloak-user-service
+    labels:
+      app: keycloak-user-service
+  spec:
+    minAvailable: 1
+    selector:
+      matchLabels:
+        app: keycloak-user-service
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: keycloak-user-service
+    labels:
+      app: keycloak-user-service
+- kind: Service
+  apiVersion: v1
+  spec:
+    ports:
+    - port: 8443
+      targetPort: 8443
+      protocol: TCP
+    selector:
+      deployment: keycloak-user-service
+  metadata:
+    name: keycloak-user-service
+    labels:
+      app: keycloak-user-service
+    annotations:
+      service.beta.openshift.io/serving-cert-secret-name: user-service
+- kind: Route
+  apiVersion: v1
+  metadata:
+    name: keycloak-user-service
+    labels:
+      app: keycloak-user-service
+      deployment: keycloak-user-service
+  spec:
+    host: "${HOSTNAME}"
+    to:
+      name: keycloak-user-service
+    tls:
+      termination: reencrypt
+- kind: Deployment
+  apiVersion: apps/v1
+  metadata:
+    name: keycloak-user-service
+    labels:
+      app: keycloak-user-service
+  spec:
+    replicas: ${{REPLICAS}}
+    selector:
+      matchLabels:
+        app: keycloak-user-service
+        deployment: keycloak-user-service
+    template:
+      metadata:
+        name: keycloak-user-service
+        labels:
+          deployment: keycloak-user-service
+          app: keycloak-user-service
+      spec:
+        serviceAccountName: keycloak-user-service
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+            - podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                    - keycloak-user-service
+                topologyKey: kubernetes.io/hostname
+              weight: 90
+            - podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                    - keycloak-user-service
+                topologyKey: topology.kubernetes.io/zone
+              weight: 100
+        volumes:
+        - name: keycloak-cert-volume
+          secret:
+            secretName: keycloak-service
+            defaultMode: 420
+        - name: user-service-cert-volume
+          secret:
+            secretName: user-service
+            defaultMode: 420
+        - name: keycloak-ca-volume
+          configMap:
+            name: openshift-service-ca.crt
+            items:
+              - key: service-ca.crt
+                path: service-ca.crt
+            defaultMode: 420
+        containers:
+        - name: keycloak-user-service
+          image: "${IMAGE}:${IMAGE_TAG}"
+          imagePullPolicy: Always
+          args: [
+            "start",
+            "--health-enabled","true",
+          ]
+          volumeMounts:
+          - name: user-service-cert-volume
+            mountPath: /etc/user-cert-volume
+            readOnly: true
+          - name: keycloak-cert-volume
+            mountPath: /etc/cert-volume
+            readOnly: true
+          - name: keycloak-ca-volume
+            readOnly: true
+            mountPath: /etc/ca-volume
+          ports:
+          - containerPort: 8080
+            protocol: TCP
+          - name: https
+            containerPort: 8443
+            protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: "/health/live"
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            timeoutSeconds: 1
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: "/health/ready"
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            timeoutSeconds: 1
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          env:
+          - name: KEYCLOAK_BACKEND_URL
+            value: "${KEYCLOAK_BACKEND_URL}"
+          - name: KEYCLOAK_REALM
+            value: "${KEYCLOAK_REALM}"
+          - name: CLIENT_ID
+            value: "admin-cli"
+          - name: KEYCLOAK_USERS_RESOURCE_URI
+            value: "admin/realms/${KEYCLOAK_REALM}/users"
+          - name: USER_SERVICE_PORT
+            value: ":8443"
+          - name: DISABLE_KEYCLOAK_CERT_VERIFICATION
+            value: "${DISABLE_KEYCLOAK_CERT_VERIFICATION}"
+          - name: USER_SERVICE_TLS_CRT_PATH
+            value: "/etc/user-cert-volume/tls.crt"
+          - name: USER_SERVICE_TLS_KEY_PATH
+            value: "/etc/user-cert-volume/tls.key"
+          - name: KEYCLOAK_TLS_CRT_PATH
+            value: "/etc/cert-volume/tls.crt"
+          - name: KEYCLOAK_TLS_KEY_PATH
+            value: "/etc/cert-volume/tls.key"
+          - name: KEYCLOAK_CA_PATH
+            value: "/etc/ca-volume/service-ca.crt"
+          - name: CORS_ALLOW_ORIGIN
+            value: "${CORS_ALLOW_ORIGIN}"
+          - name: GIN_MODE
+            value: "${GIN_MODE}"
+          # Defaults to 30 minutes
+          # - name: EMAIL_LINK_DURATION_MINUTES
+          #   value: "60"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+parameters:
+- name: IMAGE
+  value: quay.io/ecosystem-appeng/keycloak-user-service
+  displayName: Keycloak image
+  description: Keycloak docker image, defaults to quay.io/app-sre/keycloak
+- name: IMAGE_TAG
+  value: latest
+  displayName: Keycloak User Service version
+  description: Keycloak User Service version, defaults to latest
+- name: REPLICAS
+  value: "1"
+- name: HOSTNAME
+  value: ''
+  displayName: Custom https Route Hostname
+  description: 'Custom hostname for https service route. Leave blank for default hostname,
+    e.g.: <application-name>.<project>.<default-domain-suffix>'
+  required: false
+- name: KEYCLOAK_BACKEND_URL
+  value: 'https://keycloak.fips-test.svc.cluster.local:8443'
+  displayName: Keycloak Backend URL
+  description: 'The backend URL of Keycloak used by User Service '
+- name: KEYCLOAK_REALM
+  value: 'redhat-external'
+  displayName: Keycloak Realm
+  description: 'The Keycloak Realm used by User Service '
+- name: DISABLE_KEYCLOAK_CERT_VERIFICATION
+  value: 'false'
+  displayName: Keycloak Certification Verification
+  description: 'The Keycloak certificate verification settings for User Service'
+- name: CORS_ALLOW_ORIGIN
+  value: '*'
+  displayName: Access-Control-Allow-Origin
+  description: 'List of domain names that are allowed to call this service from the browser'
+- name: GIN_MODE
+  value: debug
+  displayName: GIN Mode
+  description: 'Running in "debug" mode. Switch to "release" mode in production.'

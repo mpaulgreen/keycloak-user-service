@@ -1,0 +1,438 @@
+openapi: 3.0.0
+info:
+  description: Retrieve user data from Keycloak
+  version: 1.0.0
+  title: Keycloak User Service
+tags:
+  - name: Users
+    description: Operations on users
+paths:
+  /user/:id/admin/:isAdmin:
+    put:
+      tags:
+        - Users
+      summary: Set/ reset admin status for a user
+      description: Set/ reset admin status for a user
+      operationId: setAdminStatus
+      responses:
+        '200':
+          description: Successfully set/reset admin status for a user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetAdminStatusSuccessResponse'
+        '401':
+          description: Unauthorized
+        '400':
+          description: Bad request
+        '500':
+          description: Unexpected Error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Internal server error
+  /change-users-status:
+    put:
+      tags:
+        - Users
+      summary: Bulk activate/deactivate users
+      description: Bulk activate/deactivate users
+      operationId: changeUsersStatus
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeUsersStatusDTO'
+      responses:
+        '202':
+          description: Successfully activated/deactivated users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChangeUsersStatus'
+        '401':
+          description: Unauthorized
+        '400':
+          description: Bad request
+  /user/:id/activate/:activate:
+    put:
+      tags:
+        - Users
+      summary: Activate/ deactivate a user
+      description: Activate/ deactivate a user
+      operationId: activateUser
+      responses:
+        '204':
+          description: A successfully activated/deactivated user operation
+        '401':
+          description: Unauthorized
+        '403':
+          description: Insufficient permissions to list users
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error403'
+        '500':
+          description: Unexpected Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /user/invite:
+    put:
+      tags:
+        - Users
+      summary: Invite some users to join the customer group
+      description: |
+        For each user, it creates a user under the proper group (either "users" or "admins" subgroup of the customer group), then request 
+        Keycloak to email the invited user to reset his password. All the emails are always processed in batch even in case of an individual
+        failure.
+        
+        Emails also sent for users that already existing in the current customer group.
+        
+        If the user exists in a different customer group the user creation fails and an error code 400 is returned.
+        
+        If the emal cannot be sent for any reason, an error code 400 is returned.
+      operationId: inviteUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                emails:
+                  type: array
+                  items:
+                    type: string
+                    format: Emails of the users being invited
+                isAdmin:
+                  type: boolean
+                  description: Flag indicating if the invited users should have admin privileges.
+              required:
+                - emails
+                - isAdmin
+            example:
+              emails:
+                - jsmith@company.com
+                - cumarana@mac.com
+                - yfreund@me.com
+              isAdmin: false
+      responses:
+        '201':
+          description: A successfully creation of the initial user and sending of the invite
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InviteUsersResponseOk'
+        '400':
+          description: Partial failure due to error for one or more invited users
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InviteUsersResponseFailure'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Insufficient permissions to create users
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error403'
+        '404':
+          description: Destination group not found
+        '500':
+          description: Unexpected Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /users/:
+    get:
+      tags:
+        - Users
+      summary: list
+      description: List users for an organization
+      operationId: listUsers
+      parameters:
+        - name: org_id
+          in: query
+          required: false
+          description: Parameter for filtering users by organization
+          schema:
+            type: string
+        - name: usernames
+          in: query
+          required: false
+          description: Parameter for filtering users by `username`
+          schema:
+            type: array
+            items:
+              type: string
+        - name: emails
+          in: query
+          required: false
+          description: Parameter for filtering users by `email`
+          schema:
+            type: array
+            items:
+              type: string
+        - name: user_ids
+          in: query
+          required: false
+          description: Parameter for filtering users by `user_id`
+          schema:
+            type: array
+            items:
+              type: string
+        - $ref: '#/components/parameters/QueryLimit'
+        - $ref: '#/components/parameters/QueryOffset'
+        - in: query
+          name: order
+          required: false
+          description: Parameter for ordering
+          schema:
+            type: string
+            enum:
+              - email
+              - username
+              - modified
+              - created
+        - in: query
+          name: direction
+          required: false
+          description: Used only when order parameter is specified. # Recommended by AppEng
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+      responses:
+        '200':
+          description: A paginated list of users
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPagination'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Insufficient permissions to list users
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error403'
+        '500':
+          description: Unexpected Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  parameters:
+    QueryOffset:
+      in: query
+      name: offset
+      required: false
+      description: Parameter for selecting the offset of data.
+      schema:
+        type: integer
+        default: 0
+        minimum: 0
+    QueryLimit:
+      in: query
+      name: limit
+      required: false
+      description: Parameter for selecting the amount of data returned.
+      schema:
+        type: integer
+        default: 10
+        minimum: 1
+        maximum: 1000
+  schemas:
+    ChangeUsersStatus:
+      properties:
+        id:
+          type: string
+          example: 123
+        is_active:
+          type: boolean
+          example: false
+        status:
+          type: integer
+          example: 200
+        msg:
+          type: string
+          example: success
+    ChangeUsersStatusDTO:
+      properties:
+        changeUserStatus:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChangeUsersStatus'
+    SetAdminStatusSuccessResponse:
+      properties:
+        code:
+          type: integer
+          example: 200
+        detail:
+          type: string
+          example: User is now an admin
+        status:
+          type: string
+          example: 200
+    InviteUsersResponseOk:
+      properties:
+        code:
+          type: integer
+          example: 201
+        message:
+          type: string
+          example: ""
+    InviteUsersResponseFailure:
+      properties:
+        code:
+          type: integer
+          example: 206
+        message:
+          type: string
+          example: "Completed with failures for users: jsmith@company.com, cumarana@mac.com"
+      required: []
+    Error:
+      required:
+        - errors
+      properties:
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              detail:
+                type: string
+                example: Internal server error.
+              status:
+                type: string
+                example: '500'
+    Error403:
+      required:
+        - errors
+      properties:
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              detail:
+                type: string
+                example: You do not have permission to perform this action.
+              source:
+                type: string
+                example: detail
+              status:
+                type: string
+                example: '403'
+    UUID:
+      type: object
+      required:
+        - uuid
+      properties:
+        uuid:
+          type: string
+          format: uuid
+          example: 57e60f90-8c0c-4bd1-87a0-2143759aae1c
+    Timestamped:
+      type: object
+      required:
+        - created
+        - modified
+      properties:
+        created:
+          type: string
+          format: date-time
+          example: '2019-01-21T17:32:28Z'
+        modified:
+          type: string
+          format: date-time
+          example: '2019-03-04T07:25:58Z'
+    PaginationMeta:
+      properties:
+        total:
+          type: integer
+          format: int64
+          example: 30
+        first:
+          type: string
+          format: uri
+          example: /users/?offset=0&limit=10
+        previous:
+          type: string
+          format: uri
+          example: /users/?offset=20&limit=10
+        next:
+          type: string
+          format: uri
+          example: /users/?offset=40&limit=10
+        last:
+          type: string
+          format: uri
+          example: /users/?offset=90&limit=10
+    ListPagination:
+      properties:
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+    UserPagination:
+      allOf:
+        - $ref: '#/components/schemas/ListPagination'
+        - type: object
+          required:
+            - users
+          properties:
+            users:
+              type: array
+              items:
+                $ref: '#/components/schemas/UserOut'
+    User:
+      required:
+        - name
+      properties:
+        user_id:
+          type: string
+          example: 123
+        username:
+          type: string
+          example: jdoe
+        email:
+          type: string
+          example: jdoe@example.com
+        first_name:
+          type: string
+          example: Jane
+        last_name:
+          type: string
+          example: Doe
+        org_admin:
+          type: boolean
+          example: true
+        is_internal:
+          type: boolean
+          example: false
+        is_active:
+          type: boolean
+          example: false
+        org_id:
+          type: string
+          example: 456
+        type:
+          type: string
+          example: service_account
+    UserOut:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - $ref: '#/components/schemas/UUID'
+        - $ref: '#/components/schemas/Timestamped'
