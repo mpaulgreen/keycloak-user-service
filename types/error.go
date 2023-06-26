@@ -2,10 +2,7 @@ package types
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net/http"
-
-	"github.com/rs/zerolog/log"
 
 	"github.com/pkg/errors"
 )
@@ -41,27 +38,6 @@ func BadRequest(detail string) Error {
 		Code:   http.StatusBadRequest,
 		Status: http.StatusText(http.StatusBadRequest),
 		Detail: detail,
-	}
-}
-
-func Conflict(detail string) Error {
-	return Error{
-		Code:   http.StatusConflict,
-		Status: http.StatusText(http.StatusConflict),
-		Detail: detail,
-	}
-}
-
-func ErrorFromResponse(response *http.Response, errMessage string) Error {
-	body, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		log.Error().Msg(fmt.Sprintf("Error reading response body: %s", err))
-	}
-	_ = response.Body.Close()
-	return Error{
-		Code:   response.StatusCode,
-		Status: response.Status,
-		Detail: fmt.Sprintf("%s: %s", errMessage, string(body)),
 	}
 }
 

@@ -2,7 +2,6 @@ package main
 
 import (
 	"github.com/rs/zerolog/log"
-	"net/http"
 	"strconv"
 	"strings"
 
@@ -24,13 +23,7 @@ func main() {
 		panic(err)
 	}
 	router := &routes.Router{Server: engine}
-	engine.GET("/health/ready", isHealthy)
-	engine.GET("/health/live", isHealthy)
-	router.HandleRoute(router.Server.GET, "/users", userroutes.GetUsersByUsersCriteria)
-	router.HandleRoute(router.Server.PUT, "/user/:id/activate/:activate", userroutes.ActivateUser)
-	router.HandleRoute(router.Server.PUT, "/change-users-status", userroutes.ChangeUsersStatus)
 	router.HandleRoute(router.Server.PUT, "/user/invite", userroutes.InviteUser)
-	router.HandleRoute(router.Server.PUT, "/user/:id/admin/:isAdmin", userroutes.SetAdminStatus)
 
 	disableTlsCertVerification, _ := strconv.ParseBool(types.DISABLE_KEYCLOAK_CERT_VERIFICATION)
 	if disableTlsCertVerification {
@@ -44,8 +37,4 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-}
-
-func isHealthy(c *gin.Context) {
-	c.JSON(http.StatusOK, nil)
 }
