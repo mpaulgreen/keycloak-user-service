@@ -2,58 +2,17 @@ package user_handles
 
 import (
 	"fmt"
+	"github.com/gin-gonic/gin"
+	"github.com/pkg/errors"
+	"keycloak-user-service/types"
 	"reflect"
 	"strings"
 
 	"github.com/golang-jwt/jwt"
 
-	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/exp/maps"
 )
-
-func handleNilString(str *string) string {
-	if str == nil {
-		return ""
-	} else {
-		return *str
-	}
-}
-
-func handleNilBool(boolean *bool) bool {
-	if boolean == nil {
-		return false
-	} else {
-		return *boolean
-	}
-}
-
-func containsAttributeValue(attributes *map[string][]string, key string, expectedValue string) bool {
-	if attributes != nil {
-		for _, value := range (*attributes)[key] {
-			if value == expectedValue {
-				return true
-			} else {
-				log.Debug().Msg(fmt.Sprintf("Attributes map contains attribute %s but with different value %s from the expected %s",
-					key, value, expectedValue))
-			}
-		}
-	}
-	return false
-}
-
-func getSingleAttributeValue(attributes *map[string][]string, key string) (*string, error) {
-	values, found := (*attributes)[key]
-	if !found {
-		return nil, nil
-	} else if len(values) > 1 {
-		err := errors.New(fmt.Sprintf("More than one value found for the %s attribute, aborting!", key))
-		log.Err(err).Msg("Found more than the single expected attribute")
-		return nil, err
-	} else {
-		return &values[0], nil
-	}
-}
 
 func extractClaimFromToken(claims jwt.MapClaims, claimName string) (string, error) {
 	claim, ok := claims[claimName]
@@ -86,23 +45,11 @@ func extractClaimFromToken(claims jwt.MapClaims, claimName string) (string, erro
 	return "", fmt.Errorf("value of the %s claim in the access token is not a string", claimName)
 }
 
-func hasContent(array []string) bool {
-	return array != nil && len(array) > 0
-}
-
-func equalsStringArrays(a, b []string) bool {
-	if a == nil && b == nil {
-		return true
-	} else if a == nil || b == nil {
-		return false
-	} else if len(a) != len(b) {
-		return false
-	} else {
-		for index := 0; index < len(a); index++ {
-			if a[index] != b[index] {
-				return false
-			}
-		}
+func GetAccessToken(c *gin.Context) (string, error) {
+	accessToken := c.MustGet(types.EFFECTIVE_TOKEN_KEY).(string)
+	if len(accessToken) < 10 {
+		//Bearer prefix itself is 7 characters
+		return "", errors.New("no access token of proper length was found in the request")
 	}
-	return true
+	return accessToken, nil
 }

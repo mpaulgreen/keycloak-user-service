@@ -2,8 +2,10 @@ package user_handles
 
 import (
 	"fmt"
-	"keycloak-user-service/client"
+	"github.com/go-playground/validator/v10"
+	"github.com/pkg/errors"
 	"keycloak-user-service/types"
+	"net/http"
 	"strings"
 
 	"github.com/Nerzal/gocloak/v13"
@@ -11,24 +13,54 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-func (c *CallContext) InviteUsers(params types.InviteUsers) (*types.InviteUsersResponse, error) {
-	orgId, err := c.getOrgIdFromToken(c.token)
+func (uc *UserContext) InviteUsers() {
+	var inviteUserData types.InviteUsers
+	err := uc.ginCtx.Bind(&inviteUserData)
 	if err != nil {
-		return nil, types.BadRequest(fmt.Sprintf("failed to retrieve %s from the access token: %s", types.ORG_ID_CLAIM_NAME, err.Error()))
-	}
-	clientId, err := getClientIdFromToken(c.token)
-	if err != nil {
-		return nil, types.BadRequest(fmt.Sprintf("failed to retrieve %s from the access token: %s", types.CLIENT_ID_CLAIM_NAME, err.Error()))
+		log.Debug().Msg(fmt.Sprintf("user: cannot parse Invite User Payload: %v", inviteUserData))
+		uc.ginCtx.JSON(http.StatusBadRequest, err)
+		return
 	}
 
-	response, err := c.inviteUsers(*orgId, clientId, params)
+	validate := validator.New()
+	err = validate.Struct(inviteUserData)
 	if err != nil {
-		return nil, client.ToError(err, "cannot invite users")
+		log.Debug().Msg(fmt.Sprintf("user: cannot validate Invite User Payload: %v", inviteUserData))
+		log.Error().Err(err)
+		uc.ginCtx.JSON(http.StatusBadRequest, err)
+		return
 	}
-	return response, nil
+
+	if inviteUserData.Emails == nil || len(inviteUserData.Emails) == 0 {
+		log.Debug().Msg(fmt.Sprintf("user: must include emails of users to be invited: %v", inviteUserData))
+		uc.ginCtx.JSON(http.StatusBadRequest, errors.New("must include emails of users to be invited"))
+		return
+	}
+
+	orgId, err := uc.getOrgIdFromToken(uc.token)
+	if err != nil {
+		uc.ginCtx.JSON(http.StatusBadRequest, fmt.Sprintf("failed to retrieve %s from the access token: %s", types.ORG_ID_CLAIM_NAME, err.Error()))
+		return
+	}
+	clientId, err := getClientIdFromToken(uc.token)
+	if err != nil {
+		uc.ginCtx.JSON(http.StatusBadRequest, fmt.Sprintf("failed to retrieve %s from the access token: %s", types.CLIENT_ID_CLAIM_NAME, err.Error()))
+		return
+	}
+
+	response, err := uc.inviteUsers(*orgId, clientId, inviteUserData)
+	if err != nil && errors.Cause(err) == types.INTERNAL_SERVER_ERROR {
+		uc.ginCtx.JSON(http.StatusInternalServerError, err.Error())
+		return
+	} else if err != nil && (errors.Cause(err) == types.CUSTOMER_GROUP_NOT_FOUND || errors.Cause(err) == types.CUSTOMER_GROUP_NOT_FOUND) {
+		uc.ginCtx.JSON(http.StatusBadRequest, err.Error())
+	} else {
+		uc.ginCtx.JSON(response.Code, response.Message)
+		return
+	}
 }
 
-func (c *CallContext) inviteUsers(orgId int, clientId *string, params types.InviteUsers) (*types.InviteUsersResponse, error) {
+func (c *UserContext) inviteUsers(orgId int, clientId *string, params types.InviteUsers) (*types.InviteUsersResponse, error) {
 	destinationGroupPath, err := c.destinationGroupPath(params.IsAdmin, orgId)
 	if err != nil {
 		return nil, err
@@ -55,7 +87,8 @@ func (c *CallContext) inviteUsers(orgId int, clientId *string, params types.Invi
 	return response, nil
 }
 
-func (c *CallContext) destinationGroupPath(isAdmin bool, orgId int) (string, error) {
+func (c *UserContext) destinationGroupPath(isAdmin bool, orgId int) (string, error) {
+	inviteUserError := &types.InviteUsersError{}
 	params := gocloak.GetGroupsParams{
 		Q:                   gocloak.StringP(fmt.Sprintf("%s:%d", types.ORG_ID_ATTRIBUTE, orgId)),
 		Full:                gocloak.BoolP(true),
@@ -68,7 +101,7 @@ func (c *CallContext) destinationGroupPath(isAdmin bool, orgId int) (string, err
 	}
 	if len(groups) == 0 {
 		log.Debug().Msg(fmt.Sprintf("Cannot find customer group with %s attribute set to %d", types.ORG_ID_ATTRIBUTE, orgId))
-		return "", types.NotFound(fmt.Sprintf("cannot find customer group with %s equal to %d", types.ORG_ID_ATTRIBUTE, orgId))
+		return "", errors.Wrapf(inviteUserError.CustomerGroupNotFoundError(), "cannot find customer group with %s equal to %d", types.ORG_ID_ATTRIBUTE, orgId)
 	}
 
 	if len(groups) != 1 {
@@ -78,7 +111,7 @@ func (c *CallContext) destinationGroupPath(isAdmin bool, orgId int) (string, err
 		}
 
 		log.Debug().Msg(fmt.Sprintf("Found more then 1 group with %s attribute set to %d: %s", types.ORG_ID_ATTRIBUTE, orgId, strings.Join(paths, ", ")))
-		return "", types.BadRequest(fmt.Sprintf("cannot find a single customer group with %s equal to %d, found %d", types.ORG_ID_ATTRIBUTE, orgId, len(groups)))
+		return "", errors.Wrapf(inviteUserError.MoreThanOneCustomerGroup(), "cannot find a single customer group with %s equal to %d, found %d", types.ORG_ID_ATTRIBUTE, orgId, len(groups))
 	}
 
 	customerGroup := groups[0]
@@ -88,7 +121,8 @@ func (c *CallContext) destinationGroupPath(isAdmin bool, orgId int) (string, err
 	return fmt.Sprintf("%s/users", *customerGroup.Path), nil
 }
 
-func (c *CallContext) createUserAndSendEmail(clientId *string, email string, groupPath string) error {
+func (c *UserContext) createUserAndSendEmail(clientId *string, email string, groupPath string) error {
+	inviteUserError := &types.InviteUsersError{}
 	user := gocloak.User{
 		Email:    gocloak.StringP(email),
 		Enabled:  gocloak.BoolP(true),
@@ -107,14 +141,16 @@ func (c *CallContext) createUserAndSendEmail(clientId *string, email string, gro
 	}
 	users, err := c.client.GetUsers(c.ctx, c.token, types.KEYCLOAK_REALM, search)
 	if err != nil {
-		return err
+		return errors.Wrapf(inviteUserError.InternalServerError(), "cannot find the user in realm %s",
+			types.KEYCLOAK_REALM)
 	}
 
 	var userId string
 	if len(users) == 0 {
 		userId, err = c.client.CreateUser(c.ctx, c.token, types.KEYCLOAK_REALM, user)
 		if err != nil {
-			return err
+			return errors.Wrapf(inviteUserError.InternalServerError(), "could not create user %s",
+				user)
 		}
 		log.Debug().Msg(fmt.Sprintf("Created user with ID %s", userId))
 	} else {

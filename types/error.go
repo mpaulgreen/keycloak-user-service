@@ -44,3 +44,9 @@ func BadRequest(detail string) Error {
 func (e Error) String() string {
 	return fmt.Sprintf("%s [%d] %s", e.Status, e.Code, e.Detail)
 }
+
+type UserServiceErrors interface {
+	CustomerGroupNotFoundError() error
+	MoreThanOneCustomerGroup() error
+	InternalServerError() error
+}

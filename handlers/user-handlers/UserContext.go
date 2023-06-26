@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-type CallContext struct {
+type UserContext struct {
 	client *gocloak.GoCloak
 	token  string
 	ctx    context.Context
@@ -17,17 +17,15 @@ type CallContext struct {
 	ginCtx *gin.Context
 }
 
-func NewContext(accessToken string, c *gin.Context) (CallContext, error) {
+func (uc *UserContext) NewContext(accessToken string, ginCtx *gin.Context) error {
 	kclient, err := client.NewClient()
 	if err != nil {
-		return CallContext{}, err
+		return err
 	}
-	ctx := context.Background()
-	return CallContext{
-		client: kclient,
-		token:  strings.Replace(accessToken, "Bearer ", "", 1),
-		ctx:    ctx,
-		realm:  types.KEYCLOAK_REALM,
-		ginCtx: c,
-	}, nil
+	uc.client = kclient
+	uc.token = strings.Replace(accessToken, "Bearer ", "", 1)
+	uc.ctx = context.Background()
+	uc.realm = types.KEYCLOAK_REALM
+	uc.ginCtx = ginCtx
+	return nil
 }
