@@ -52,7 +52,7 @@ func (uc *UserContext) InviteUsers() {
 	if err != nil && errors.Cause(err) == types.INTERNAL_SERVER_ERROR {
 		uc.ginCtx.JSON(http.StatusInternalServerError, err.Error())
 		return
-	} else if err != nil && (errors.Cause(err) == types.CUSTOMER_GROUP_NOT_FOUND || errors.Cause(err) == types.CUSTOMER_GROUP_NOT_FOUND) {
+	} else if err != nil && (errors.Cause(err) == types.CUSTOMER_GROUP_NOT_FOUND || errors.Cause(err) == types.MORE_THAN_ONE_CUSTOMER_GROUP) {
 		uc.ginCtx.JSON(http.StatusBadRequest, err.Error())
 	} else {
 		uc.ginCtx.JSON(response.Code, response.Message)
